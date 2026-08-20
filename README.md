@@ -1,36 +1,29 @@
-# AIS / TIS / 26AS Reconciliation — Browser Tool v1.2.0
+# AIS / TIS / 26AS Reconciliation — Browser Tool
 
-**One URL → upload AIS + TIS + 26AS → download the reconciliation in the supplied Excel template.**
+Version 1.3.1
 
-## v1.2.0 changes
-- Added AIS **194Q → 94Q - Purchases** support.
-- Added AIS **194R → 94R - Benefits / Perquisites** support.
-- Added the 94R head to the Summary/Masters template.
-- TIS **Business receipts** is reconciled as one category across 194C + 194H + 194Q + 194R. When the category total agrees with AIS, the TIS amount is allocated to each AIS party using its AIS amount. When it does not agree, TIS party allocation is withheld and the rows are marked Review.
-- Difference formulas now distinguish **zero from blank / N/A**; a real zero-versus-nonzero difference is not suppressed.
-- Added **Start New Client** reset button.
-- Client name / AY / FY are populated from the uploaded documents; old client data is not retained in the clean template.
+Upload AIS + TIS + Form 26AS and download the reconciliation in the supplied Excel template. The tool runs locally in the browser and does not require a Claude/API key.
 
-## Use
-Put `index.html`, `app.js`, and `template.xlsx` in the same web location. GitHub Pages works well:
+## Supported scope
+The parser is designed to detect both business and individual information categories, including common TDS/TCS sections, salary, dividend, interest, securities transactions, GST turnover/purchases, and other relevant AIS/TIS categories. Unsupported/unclassified categories are surfaced as review items instead of being silently discarded.
 
-1. Upload the three files to the repository root.
-2. GitHub **Settings → Pages**.
-3. **Deploy from a branch → main → /(root)**.
-4. Open the generated Pages URL.
+## Safety rules
+- AIS is the party/row base.
+- AIS gross uses the AIS reporting-entity summary amount.
+- AIS TDS/TCS uses active/current detail rows; inactive rows are excluded and noted.
+- TIS uses Reported by Source where source detail can be isolated. If only the category-level value is safe to use because Processed by System equals Accepted by Taxpayer/Confirmed by Source, a visible fallback warning is generated.
+- TIS category totals must reconcile to effective AIS totals before party-level TIS values are allocated.
+- Duplicate SFT/TDS representations are retained in Reco but excluded from Summary/category totals when they are the same party, category and amount.
+- 26AS reversals are netted at party + section level.
+- The tool stops rather than truncating when the template row capacity is exceeded.
+- A Start New Client button clears the current session.
 
-No installation is required on the user's computer.
 
-## Inputs
-Exactly three PDFs:
-- AIS
-- TIS
-- Form 26AS
-
-Books figures remain blank for manual entry in the supplied template.
-
-## Privacy model
-PDF processing is performed in the browser. No Claude/API key is required. The page loads public JavaScript libraries and the local `template.xlsx` file.
-
-## Important
-The supplied Reco area has 54 detail rows. The tool stops instead of silently truncating a client with more than 54 AIS base rows.
+### v1.4.0 changes
+- Broader category coverage for business and individual cases.
+- Better metadata extraction across AIS/TIS/26AS layouts.
+- Improved 26AS summary-to-detail grouping using exact total matching.
+- Inactive AIS TDS/TCS transactions are excluded from current reconciliation totals.
+- SFT/TDS duplicate representations are excluded from Summary when they explain the TIS category total; source rows remain in Reco with a review note.
+- Unsupported categories are surfaced as review exceptions instead of silently dropped.
+- Start New Client reset remains available.

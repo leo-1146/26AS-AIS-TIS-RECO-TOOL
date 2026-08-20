@@ -17,7 +17,7 @@ label{display:block;font-size:12px;font-weight:700;text-transform:uppercase;lett
 </head>
 <body>
 <div class="wrap">
-  <div class="head"><h1>AIS / TIS / 26AS Reconciliation</h1><p class="sub">Upload three PDFs and download the reconciliation in the supplied Excel template.</p></div>
+  <div class="head"><h1>AIS / TIS / 26AS Reconciliation</h1><p class="sub">Upload AIS + TIS + 26AS and download the reconciliation in the supplied Excel template. Business and individual information categories are detected automatically.</p></div>
   <div class="card">
     <div class="grid">
       <div><label>AIS PDF</label><input id="ais" type="file" accept="application/pdf"><div id="aisOk"></div></div>
@@ -25,7 +25,7 @@ label{display:block;font-size:12px;font-weight:700;text-transform:uppercase;lett
       <div><label>Form 26AS PDF</label><input id="as26" type="file" accept="application/pdf"><div id="as26Ok"></div></div>
       <div><label>Prepared by (optional)</label><input id="preparedBy" type="text" placeholder="Your name"></div>
     </div>
-    <div class="actions"><button id="go" disabled>Generate Excel</button></div>
+    <div class="actions"><button id="go" disabled>Generate Excel</button><button id="reset" type="button" style="margin-left:10px;background:#6b6f70">Start New Client</button></div>
     <div class="status" id="status"></div>
     <div class="steps" id="steps"><div class="step" id="s1">Reading documents</div><div class="step" id="s2">Extracting AIS / TIS / 26AS</div><div class="step" id="s3">Reconciling parties and sections</div><div class="step" id="s4">Populating Excel template</div><div class="step" id="s5">Preparing download</div></div>
   </div>
@@ -34,7 +34,7 @@ label{display:block;font-size:12px;font-weight:700;text-transform:uppercase;lett
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
-<script src="app.js?v=1.1.1"></script>
+<script src="app.js?v=1.4.0"></script>
 <script>
 const ids=['ais','tis','as26']; const go=document.getElementById('go'), status=document.getElementById('status'), steps=document.getElementById('steps');
 function ready(){go.disabled=!ids.every(id=>document.getElementById(id).files.length)}
@@ -48,11 +48,20 @@ async function main(){go.disabled=true;status.className='status';status.textCont
   const metas=[a.meta,t.meta,c.meta],pans=[...new Set(metas.map(x=>x.pan).filter(Boolean))],fys=[...new Set(metas.map(x=>x.fy).filter(Boolean))];
   if(pans.length>1)throw new Error('PAN mismatch across the three PDFs: '+pans.join(', ')); if(fys.length>1)throw new Error('Financial Year mismatch across the three PDFs: '+fys.join(', '));
   step(3); const result=AISReco.reconcile(a,t,c,[...e1,...e2,...e3]);
-  if(result.rows.length>54)throw new Error(`The supplied Excel template supports 54 Reco rows; ${result.rows.length} AIS rows were detected. No data was truncated.`);
+  if(result.rows.length>AISReco.TEMPLATE_ROWS)throw new Error(`The supplied Excel template supports ${AISReco.TEMPLATE_ROWS} Reco rows; ${result.rows.length} AIS rows were detected. No data was truncated.`);
   step(4); const blob=await AISReco.generateWorkbook(result,document.getElementById('preparedBy').value.trim()); step(5);
   const url=URL.createObjectURL(blob); const aEl=document.createElement('a'); aEl.href=url; aEl.download=`${(result.meta.name||'Client').replace(/[^A-Za-z0-9 _.-]/g,'_')} - AIS-TIS-26AS Reconciliation - AY ${result.meta.ay||''}.xlsx`;document.body.appendChild(aEl);aEl.click();aEl.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   status.className='status ok';status.textContent=`Done. ${result.rows.length} Reco rows generated. ${result.exceptions.length} review exception(s) identified.`;
 }catch(err){status.className='status err';status.textContent=err.message||String(err);}finally{ready();}}
 go.addEventListener('click',main);
+
+const resetBtn=document.getElementById('reset');
+resetBtn.addEventListener('click',()=>{
+  ids.forEach(id=>{document.getElementById(id).value='';document.getElementById(id+'Ok').textContent='';});
+  document.getElementById('preparedBy').value='';
+  status.className='status';status.textContent='';steps.style.display='none';
+  for(let i=1;i<=5;i++) document.getElementById('s'+i).classList.remove('done');
+  ready();
+});
 </script>
 </body></html>

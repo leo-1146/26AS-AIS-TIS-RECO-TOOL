@@ -1,2 +1,1 @@
-Version 1.2.0
-Adds 194Q/194R support, TIS business-receipts grouped allocation validation, correct zero/blank difference formulas, 94R Summary head, source-driven client metadata, and Start New Client reset.
+Version 1.4.0 - versatile AIS/TIS/26AS category-aware reconciliation engine
