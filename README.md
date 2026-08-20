@@ -1,42 +1,36 @@
-# AIS / TIS / 26AS Reconciliation — Browser Tool
+# AIS / TIS / 26AS Reconciliation — Browser Tool v1.2.0
 
-**One URL → upload AIS + TIS + 26AS → download your Excel reconciliation.**
+**One URL → upload AIS + TIS + 26AS → download the reconciliation in the supplied Excel template.**
 
-## What it does
+## v1.2.0 changes
+- Added AIS **194Q → 94Q - Purchases** support.
+- Added AIS **194R → 94R - Benefits / Perquisites** support.
+- Added the 94R head to the Summary/Masters template.
+- TIS **Business receipts** is reconciled as one category across 194C + 194H + 194Q + 194R. When the category total agrees with AIS, the TIS amount is allocated to each AIS party using its AIS amount. When it does not agree, TIS party allocation is withheld and the rows are marked Review.
+- Difference formulas now distinguish **zero from blank / N/A**; a real zero-versus-nonzero difference is not suppressed.
+- Added **Start New Client** reset button.
+- Client name / AY / FY are populated from the uploaded documents; old client data is not retained in the clean template.
 
-- Requires exactly three PDFs: AIS, TIS and Form 26AS.
-- Uses AIS as the base party list.
-- Creates one Reco row for each AIS reporting party + information code/section.
-- Uses TIS **Reported by Source**.
-- Reconciles 26AS after netting genuine reversal entries.
-- Uses the supplied Excel template and keeps the `Reco`, `Summary` and `Masters` sheets and their formulas/formatting.
-- Leaves Books columns blank for manual entry.
-- Stops instead of truncating data if more than the template's 54 Reco rows are detected.
-- Flags material differences in the Reco `Action` / `Remarks` columns.
-- No Claude/API key is required.
+## Use
+Put `index.html`, `app.js`, and `template.xlsx` in the same web location. GitHub Pages works well:
 
-## Use it without installing anything
+1. Upload the three files to the repository root.
+2. GitHub **Settings → Pages**.
+3. **Deploy from a branch → main → /(root)**.
+4. Open the generated Pages URL.
 
-The folder is a static website. Put `index.html`, `app.js` and `template.xlsx` in the same web location.
+No installation is required on the user's computer.
 
-### Easiest: GitHub Pages
+## Inputs
+Exactly three PDFs:
+- AIS
+- TIS
+- Form 26AS
 
-1. Create a GitHub repository.
-2. Upload the three files in this folder.
-3. Open **Settings → Pages**.
-4. Set **Deploy from a branch → main → /(root)**.
-5. Open the URL GitHub gives you.
-
-Anyone can then use the URL in Chrome/Edge/Firefox. Nothing is installed on their computer.
+Books figures remain blank for manual entry in the supplied template.
 
 ## Privacy model
-
-The PDFs are processed in the user's browser. The page does not send the uploaded AIS/TIS/26AS files to Claude or another reconciliation API. The only network requests are loading the static template and the public JavaScript libraries used by the page.
-
-## Template
-
-`template.xlsx` is the supplied reconciliation workbook. Do not rename it; the page loads it by that exact filename.
+PDF processing is performed in the browser. No Claude/API key is required. The page loads public JavaScript libraries and the local `template.xlsx` file.
 
 ## Important
-
-The supplied template has a fixed 54-row Reco area. The tool deliberately stops rather than silently dropping rows when a future AIS contains more than 54 base rows. In that case, the template should be expanded before the tool is used for that client.
+The supplied Reco area has 54 detail rows. The tool stops instead of silently truncating a client with more than 54 AIS base rows.

@@ -4,21 +4,33 @@ const HEAD_MAP = {
   '194A': '94A - Interest Receipts',
   '194C': '94C - Contract Receipts',
   '194H': '94H - Commission Receipts',
+  '194Q': '94Q - Purchases',
+  '194R': '94R - Benefits / Perquisites',
   '206CL': '206CL - TCS Purchases'
 };
 const TIS_MAP = {
   '94A - Interest Receipts': ['Interest from deposit'],
   '94C - Contract Receipts': ['Business receipts'],
   '94H - Commission Receipts': ['Business receipts'],
+  '94Q - Purchases': ['Business receipts'],
+  '94R - Benefits / Perquisites': ['Business receipts'],
   'GST Sales': ['GST turnover'],
   'GST Purchases': ['GST purchases'],
   '206CL - TCS Purchases': ['Purchase of vehicle']
 };
 const TEMPLATE_ROWS = 54;
+const TIS_GROUPS = {
+  'Interest from deposit': ['94A - Interest Receipts'],
+  'Business receipts': ['94C - Contract Receipts','94H - Commission Receipts','94Q - Purchases','94R - Benefits / Perquisites'],
+  'GST turnover': ['GST Sales'],
+  'GST purchases': ['GST Purchases'],
+  'Purchase of vehicle': ['206CL - TCS Purchases']
+};
+
 const SUMMARY_HEADS = [
   '92B - Salaries Receipts','94C - Contract Receipts','94JA - Technical Receipts',
   '94JB - Professional Receipts','94IA - Rent Receipts (P & M) ','94IB - Rent Receipts (L & B) ',
-  '94A - Interest Receipts','94Q - Purchases','94H - Commission Receipts','94L - Property Transactions',
+  '94A - Interest Receipts','94Q - Purchases','94H - Commission Receipts','94R - Benefits / Perquisites','94L - Property Transactions',
   'Purchase of Securities','Sale of Securities','GST Sales','GST Purchases','Advance Tax','Cash Deposits',
   'Cash Withdrawals','SAT','206CJ - TCS Purchases','206CE - TCS Purchases','206CL - TCS Purchases',
   '206CR-TCS Purchases','94N - Cash Withdrawals'
@@ -34,11 +46,16 @@ function deriveAY(fy){
   const y=Number(fy.slice(0,4))+1; return `${y}-${String(y+1).slice(-2)}`;
 }
 function parseMeta(text){
+  text=String(text||'').replace(/\s*\|\|\s*/g,' ');
   let pan='',name='';
-  let m=text.match(/Permanent Account Number \(PAN\).*?\n\s*([A-Z0-9]{10})\s+NA\s+([^\n]+)/s);
-  if(m){pan=m[1]; name=normSpace(m[2]);}
-  if(!name){ m=text.match(/General Information.*?\n\s*[A-Z0-9]{10}\s+NA\s+([^\n]+)/s); if(m) name=normSpace(m[1]); }
-  if(!pan){ m=text.match(/Permanent Account Number \(PAN\)\s+([A-Z0-9]{10})/); if(m) pan=m[1]; }
+  let m=text.match(/Permanent Account Number \(PAN\).*?\b([A-Z0-9]{10})\b/s);
+  if(m) pan=m[1];
+  m=text.match(/Name of Assessee\s*\n?\s*([A-Z][^\n]+?)(?=\s*(?:Address of Assessee|Date of Incorporation|$))/i);
+  if(m){ name=normSpace(m[1]).replace(/^[A-Z0-9]{10}\s+NA\s+/,'').trim(); }
+  if(!name){
+    m=text.match(/General Information.*?\b[A-Z0-9]{10}\b\s+(?:NA\s+)?([^\n]+)/s);
+    if(m){ name=normSpace(m[1]).replace(/^[A-Z0-9]{10}\s+NA\s+/,'').trim(); }
+  }
   let fy=(text.match(/Financial Year\s+([0-9]{4}-[0-9]{2})/)||[])[1]||'';
   let ay=(text.match(/Assessment Year\s+([0-9]{4}-[0-9]{2})/)||[])[1]||deriveAY(fy);
   return {pan,name,fy,ay};
@@ -66,7 +83,8 @@ async function extractPdfLines(file){
       let out='', lastEnd=null;
       for(const it of r.items){
         const gap=lastEnd==null?0:it.x-lastEnd;
-        if(out && gap>2.5 && !out.endsWith(' ')) out+=' ';
+        if(out && (gap>25 || (it.x>=460 && lastEnd<460) || (it.x>=790 && lastEnd<790) || (it.x>=885 && lastEnd<885))){ if(!out.endsWith(' ')) out+=' || '; }
+        else if(out && gap>2.5 && !out.endsWith(' ')) out+=' ';
         out+=it.str; lastEnd=it.x+it.w;
       }
       return out.trim();
@@ -77,27 +95,37 @@ async function extractPdfLines(file){
 const allText = pages => pages.map(p=>p.join('\n')).join('\n');
 
 function findAisSummary(lines,idx){
-  const line=lines[idx];
-  const cm=line.match(/\b(?:TDS|TCS)-(\w+)\b/); if(!cm) throw new Error('AIS information code not found');
-  const sec=cm[1], nums=moneyTokens(line); if(nums.length<2) throw new Error(`AIS summary amount missing for ${sec}`);
-  const gross=num(nums[nums.length-1]);
-  const block=lines.slice(idx,idx+3).join(' ');
-  let m=block.match(/\(Section\s+[^)]+\)\s+(.+?)(\([A-Z0-9]{10}\))\s+\d+\s+-?[\d,]+(?:\.\d+)?/);
-  if(m) return {source:normSpace(m[1]+m[2]),section:sec,gross,identifier:m[2].slice(1,-1)};
-  m=line.match(/\(Section\s+[^)]+\)\s+(.+?)\s+\d+\s+-?[\d,]+(?:\.\d+)?\s*$/);
-  if(m && lines[idx+1]){
-    const im=lines[idx+1].match(/\(([A-Z0-9]{10})\)/); if(im) return {source:normSpace(m[1])+` (${im[1]})`,section:sec,gross,identifier:im[1]};
-  }
-  // Section label wrapped to the next physical line (e.g. 194A in AIS).
-  if(lines[idx+1] && /\(Section\s+[^)]+\)/.test(lines[idx+1])){
-    const lm=line.match(/TDS-(?:\w+)\s+(.+?)\s+\d+\s+-?[\d,]+(?:\.\d+)?\s*$/);
-    const im=block.match(/\(([A-Z0-9]{10})\)/);
-    if(lm){
-      const sm=lm[1].match(/(?:received|credited)\s+(.+)$/i);
-      const source0=sm?normSpace(sm[1]):normSpace(lm[1]);
-      const source=source0.replace(new RegExp('\\s*\\('+im[1]+'\\)\\s*$'),'').trim();
-      if(im) return {source:source+` (${im[1]})`,section:sec,gross,identifier:im[1]};
+  const cm=lines[idx].match(/\b(?:TDS|TCS)-([A-Z0-9]+)\b/i);
+  if(!cm) throw new Error('AIS information code not found');
+  const sec=cm[1].toUpperCase();
+  const upto=Math.min(idx+6,lines.length);
+
+  // PDF.js extraction now preserves large column gaps as "||". This gives us a stable
+  // source/count/amount boundary across different AIS layouts.
+  for(let i=idx;i<upto;i++){
+    const parts=lines[i].split(/\s*\|\|\s*/).map(normSpace).filter(Boolean);
+    for(let j=0;j<parts.length;j++){
+      const m=parts[j].match(/^(.+?)\s*\(([A-Z0-9]{10})\)\s*$/);
+      if(!m) continue;
+      const countPart=parts[j+1]||'';
+      const amountPart=parts[j+2]||'';
+      const cmatch=countPart.match(/^(\d+)$/);
+      const amatch=amountPart.match(/^(-?[\d,]+(?:\.\d+)?)$/);
+      if(cmatch&&amatch){
+        return {source:normSpace(m[1]),section:sec,gross:num(amatch[1]),identifier:m[2]};
+      }
+      // Fallback if count and amount stayed in the same column.
+      const inline=parts[j].match(/^(.+?)\s*\(([A-Z0-9]{10})\)\s+(\d+)\s+(-?[\d,]+(?:\.\d+)?)$/);
+      if(inline) return {source:normSpace(inline[1]),section:sec,gross:num(inline[4]),identifier:inline[2]};
     }
+  }
+
+  // Final fallback for older cached pages without gap delimiters.
+  const block=lines.slice(idx,upto).join(' ');
+  const fm=block.match(/(?:\(Section\s+[^)]+\)\s+)?(.+?)\s*\(([A-Z0-9]{10})\)\s+(\d+)\s+(-?[\d,]+(?:\.\d+)?)\s*/i);
+  if(fm){
+    let src=normSpace(fm[1]).replace(/^.*TDS-[A-Z0-9]+\s+/i,'').trim();
+    return {source:src,section:sec,gross:num(fm[4]),identifier:fm[2]};
   }
   throw new Error(`Could not parse AIS source row around ${sec}`);
 }
@@ -109,13 +137,15 @@ function parseAIS(pages){
     try{
       const {source,section,gross:summaryGross,identifier}=findAisSummary(lines,idx);
       let detailGross=0, detailTds=0, status='';
-      for(const dl of lines.slice(idx+1,end)){
+      for(const dlRaw of lines.slice(idx+1,end)){
+        const dl=dlRaw.replace(/\s*\|\|\s*/g,' ');
         if(/\bQ[1-4]\([^)]*\)\s+\d{2}\/\d{2}\/\d{4}/.test(dl)){
           const toks=moneyTokens(dl); if(toks.length>=3){detailGross+=num(toks[toks.length-3]); detailTds+=num(toks[toks.length-2]); if(/\bInactive\b/i.test(dl)) status='Inactive';}
         }
       }
       let gross=summaryGross, note='';
-      if(Math.abs(gross)<1e-9 && Math.abs(detailGross)>1e-9){ gross=detailGross; note='AIS summary shows zero/inactive; underlying transaction amount used.'; }
+      // AIS gross is taken strictly from the reporting-entity summary row, as specified.
+      // Underlying transaction detail is used only for TDS/TCS support and audit context.
       const head=HEAD_MAP[section]; if(!head){exceptions.push({type:'AIS_UNMAPPED_SECTION',severity:'HIGH',details:`Unmapped AIS section ${section} for ${source}`});continue;}
       rows.push({head,section,source,gross:Math.round(gross*100)/100,tds:Math.round(detailTds*100)/100,summary_gross:summaryGross,detail_gross:detailGross,note,identifier,status});
     }catch(e){exceptions.push({type:'AIS_PARSE',severity:'HIGH',details:String(e.message||e)})}
@@ -131,7 +161,8 @@ function parseAIS(pages){
 }
 
 function parseTIS(pages){
-  const text=allText(pages),meta=parseMeta(text),lines=pages.flat(),cats={};
+  const cleanPages=pages.map(p=>p.map(l=>l.replace(/\s*\|\|\s*/g,' ')));
+  const text=allText(cleanPages),meta=parseMeta(text),lines=cleanPages.flat(),cats={};
   const names=['Interest from deposit','Business receipts','GST turnover','GST purchases','Purchase of vehicle'];
   for(const l of lines.slice(0,120)){
     const m=l.match(/^\s*\d+\s+(Interest from deposit|Business receipts|GST turnover|GST purchases|Purchase of vehicle)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$/);
@@ -165,7 +196,8 @@ function parseTIS(pages){
 }
 
 function parse26AS(pages){
-  const text=allText(pages),meta=parseMeta(text),lines=pages.flat(),map={},mapTan={},exceptions=[];let party=null,tan=null;
+  const cleanPages=pages.map(p=>p.map(l=>l.replace(/\s*\|\|\s*/g,' ')));
+  const text=allText(cleanPages),meta=parseMeta(text),lines=cleanPages.flat(),map={},mapTan={},exceptions=[];let party=null,tan=null;
   for(const line of lines){
     const s=line.trim();
     const sm=s.match(/^\d+\s+(.+?)\s+([A-Z]{4}[A-Z0-9]{6})\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*$/);
@@ -181,33 +213,105 @@ function parse26AS(pages){
 }
 
 function reconcile(ais,tis,as26,exceptions){
-  const rows=[];const aisTotals={};for(const r of ais.rows)aisTotals[r.head]=(aisTotals[r.head]||0)+(typeof r.gross==='number'?r.gross:0);
-  const allowed={};
-  for(const [head,cats] of Object.entries(TIS_MAP)){
-    const total=cats.reduce((a,c)=>a+(tis.categories[c]?.reported||0),0);let at=aisTotals[head]||0;if(head==='94C - Contract Receipts'||head==='94H - Commission Receipts')at=(aisTotals['94C - Contract Receipts']||0)+(aisTotals['94H - Commission Receipts']||0);
-    allowed[head]=Math.abs(total-at)<=0.01;if((total||at)&&!allowed[head])exceptions.push({type:'TIS_TOTAL_MISMATCH',severity:'HIGH',details:`${cats.join(', ')}: TIS Reported by Source ${total.toFixed(2)} vs AIS ${at.toFixed(2)}`});
-  }
-  const dup={};for(const r of ais.rows) if(!['GST Sales','GST Purchases'].includes(r.head)){const k=normalizeParty(r.source)+'|'+r.section;dup[k]=(dup[k]||0)+1;}
+  const rows=[];
+  const aisTotals={};
   for(const r of ais.rows){
-    const head=r.head,sec=r.section,party=r.source,id=r.identifier||'';let display=party;if(dup[normalizeParty(party)+'|'+sec]>1&&id&&!display.includes(id))display=`${party} (${id})`;
-    let c26='NA',d26='NA';
-    if(!['GST Sales','GST Purchases'].includes(head)){
-      let a=null;if(id)a=as26.mapTan[normalizeParty(party)+'|'+sec+'|'+id];if(!a)a=as26.map[normalizeParty(party)+'|'+sec];
-      if(a){c26=Math.round(a.gross*100)/100;d26=Math.round(a.tds*100)/100;}else{c26=null;d26=null;}
+    if(typeof r.gross==='number') aisTotals[r.head]=(aisTotals[r.head]||0)+r.gross;
+  }
+
+  // Determine whether each TIS category can safely be allocated to AIS party rows.
+  // For Business receipts, 194C + 194H + 194Q + 194R are one TIS category.
+  const categoryAllowed={};
+  const categoryChecks=[];
+  for(const [category,heads] of Object.entries(TIS_GROUPS)){
+    const tisTotal = tis.categories[category]?.reported ?? null;
+    const aisTotal = heads.reduce((sum,h)=>sum+(aisTotals[h]||0),0);
+    if(tisTotal===null){
+      categoryAllowed[category]=null;
+      continue;
     }
-    const cats=TIS_MAP[head]||[];let gTis='NA';if(cats.length)gTis=allowed[head]?Math.round(r.gross*100)/100:null;
-    const row={head,party:display,c26,d26,eAis:Math.round(r.gross*100)/100,fAis:r.tds==='NA'?'NA':Math.round(r.tds*100)/100,gTis,hTis:'NA',action:'No Action',remarks:r.note||''};
-    let a=null;if(id&&head!=='GST Sales'&&head!=='GST Purchases')a=as26.mapTan[normalizeParty(party)+'|'+sec+'|'+id];if(!a&&head!=='GST Sales'&&head!=='GST Purchases')a=as26.map[normalizeParty(party)+'|'+sec];
-    if(a?.reversal)row.remarks+=(row.remarks?' ':'')+'26AS reversal/cancellation entries netted at section level.';
-    if(c26===null&&head!=='GST Sales'&&head!=='GST Purchases'){row.action='Review';row.remarks=row.remarks||'AIS party/section not found in 26AS.';}
-    if(cats.length&&!allowed[head]){row.action='Review';row.remarks=row.remarks||'TIS category total does not reconcile to AIS; TIS party allocation withheld.';}
-    if(head!=='GST Sales'&&head!=='GST Purchases'){
-      const gd=(typeof c26==='number'&&typeof row.eAis==='number')?Math.abs(c26-row.eAis):0, td=(typeof d26==='number'&&typeof row.fAis==='number')?Math.abs(d26-row.fAis):0;
-      if(gd>=1||td>=1){row.action='Review'; if(td>=1)row.remarks+=(row.remarks?' ':'')+`26AS TDS/TCS differs from AIS by ₹${(d26-row.fAis).toFixed(2)}.`; else row.remarks+=(row.remarks?' ':'')+`26AS gross differs from AIS by ₹${(c26-row.eAis).toFixed(2)}.`;}
-      else if(gd>0.01||td>0.01) row.remarks+=(row.remarks?' ':'')+`Minor source difference; within ₹1.`;
+    const ok=Math.abs(tisTotal-aisTotal)<=0.01;
+    categoryAllowed[category]=ok;
+    categoryChecks.push({category,tisTotal,aisTotal,ok});
+    if((tisTotal||aisTotal) && !ok){
+      exceptions.push({type:'TIS_TOTAL_MISMATCH',severity:'HIGH',details:`${category}: TIS Reported by Source ${tisTotal.toFixed(2)} vs AIS ${aisTotal.toFixed(2)}`});
+    }
+  }
+
+  const dup={};
+  for(const r of ais.rows){
+    if(!['GST Sales','GST Purchases'].includes(r.head)){
+      const k=normalizeParty(r.source)+'|'+r.section;
+      dup[k]=(dup[k]||0)+1;
+    }
+  }
+
+  for(const r of ais.rows){
+    const head=r.head, sec=r.section, party=r.source, id=r.identifier||'';
+    let display=party;
+    // Keep Name of Party clean; TAN/PAN stays in the source identifier and remarks if needed.
+
+    let c26='NA', d26='NA', a26=null;
+    if(!['GST Sales','GST Purchases'].includes(head)){
+      if(id) a26=as26.mapTan[normalizeParty(party)+'|'+sec+'|'+id];
+      if(!a26) a26=as26.map[normalizeParty(party)+'|'+sec];
+      if(a26){
+        c26=Math.round(a26.gross*100)/100;
+        d26=Math.round(a26.tds*100)/100;
+      }else{
+        c26=null; d26=null;
+      }
+    }
+
+    const category=(TIS_MAP[head]||[])[0] || null;
+    let gTis='NA';
+    // Allocation rule already agreed: when category totals reconcile, each AIS party receives its AIS amount.
+    if(category){
+      gTis = categoryAllowed[category]===true ? Math.round(r.gross*100)/100 : null;
+    }
+
+    const row={
+      head, party:display,
+      c26,d26,
+      eAis:Math.round(r.gross*100)/100,
+      fAis:r.tds==='NA'?'NA':Math.round(r.tds*100)/100,
+      gTis,
+      hTis:'NA',
+      action:'No Action',
+      remarks:r.note||''
+    };
+
+    if(a26?.reversal){
+      row.remarks+=(row.remarks?' ':'')+'26AS reversal/cancellation entries netted at section level.';
+    }
+    if(c26===null && !['GST Sales','GST Purchases'].includes(head)){
+      row.action='Review';
+      row.remarks=row.remarks||'AIS party/section not found in 26AS.';
+    }
+    if(category && categoryAllowed[category]===false){
+      row.action='Review';
+      row.remarks+=(row.remarks?' ':'')+'TIS category total does not reconcile to AIS; TIS party allocation withheld.';
+    }
+
+    if(!['GST Sales','GST Purchases'].includes(head)){
+      const gd=(typeof c26==='number'&&typeof row.eAis==='number')?Math.abs(c26-row.eAis):0;
+      const td=(typeof d26==='number'&&typeof row.fAis==='number')?Math.abs(d26-row.fAis):0;
+      if(gd>=1 || td>=1){
+        row.action='Review';
+        if(td>=1) row.remarks+=(row.remarks?' ':'')+`26AS TDS/TCS differs from AIS by ₹${(d26-row.fAis).toFixed(2)}.`;
+        else row.remarks+=(row.remarks?' ':'')+`26AS gross differs from AIS by ₹${(c26-row.eAis).toFixed(2)}.`;
+      }else if(gd>0.01 || td>0.01){
+        row.remarks+=(row.remarks?' ':'')+'Minor source difference; within ₹1.';
+      }
     }
     rows.push(row);
   }
+
+  // Add a concise validation trail for the UI / diagnostics.
+  for(const x of categoryChecks){
+    if(x.ok) exceptions.push({type:'TIS_VALIDATION',severity:'INFO',details:`${x.category}: TIS Reported by Source ${x.tisTotal.toFixed(2)} reconciles to AIS ${x.aisTotal.toFixed(2)}.`});
+  }
+
   return {meta:ais.meta,rows,exceptions};
 }
 
