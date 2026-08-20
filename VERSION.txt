@@ -1,0 +1,2 @@
+AIS/TIS/26AS Reconciliation Browser Tool v1.0
+Deterministic local parsing; supplied Excel template preserved.
