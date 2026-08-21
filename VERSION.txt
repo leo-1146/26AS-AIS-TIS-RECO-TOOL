@@ -1,1 +1,1 @@
-Version 1.6.2 - non-blocking parser/reconciliation workers, live stage progress, timeout/error reporting, and 54-row template guard
+Version 1.6.3 - parallel PDF extraction, optimized row grouping, page-level progress, and stage timing
