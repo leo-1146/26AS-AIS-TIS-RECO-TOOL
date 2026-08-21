@@ -1,1 +1,1 @@
-Version 1.6.5 - fixed worker dispatch timeout, parallel extraction, page-level progress, and stage timing
+Version 1.6.6 - robust native PDF uploader, worker dispatch fix, parallel extraction, and stage timing
