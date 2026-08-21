@@ -1,1 +1,1 @@
-Version 1.6.3 - parallel PDF extraction, optimized row grouping, page-level progress, and stage timing
+Version 1.6.5 - fixed worker dispatch timeout, parallel extraction, page-level progress, and stage timing
