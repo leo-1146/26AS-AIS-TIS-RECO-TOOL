@@ -1,7 +1,7 @@
 /* RECON portable parser bootstrap v1.8.4
-   Loads the pinned parser core, then repairs deterministic metadata handling for 26AS. */
+   Loads the same-origin parser core, then repairs deterministic metadata handling for 26AS. */
 (function(){
-  const CORE='https://raw.githubusercontent.com/leo-1146/26AS-AIS-TIS-RECO-TOOL/b0c2ddd5bcf8bc4db9decb70f1d6ff277a3c3914/app.js';
+  const CORE='https://leo-1146.github.io/26AS-AIS-TIS-RECO-TOOL/app_core.js?v=1.8.4';
   if(!window.AISReco){
     document.write('<script src="'+CORE+'"><\\/script>');
   }
