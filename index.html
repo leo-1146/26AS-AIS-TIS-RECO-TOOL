@@ -27,21 +27,101 @@ body{min-height:100vh}.page{max-width:1000px;margin:0 auto;padding:28px 24px 36p
 <div class="status-panel"><div class="status" id="status">Waiting for documents.</div><div class="steps"><div class="step-list"><div class="step" id="s1">Reading</div><div class="step" id="s2">Extracting</div><div class="step" id="s3">Reconciling</div><div class="step" id="s4">Building</div><div class="step" id="s5">Download</div></div></div></div>
 </section>
 <div class="security"><div class="security-icon">✓</div><div><b>Local processing.</b> No external reconciliation service.</div></div>
-<div class="footer"><div><strong>RECON</strong></div><div>v1.6.2</div></div>
+<div class="footer"><div><strong>RECON</strong></div><div>v1.6.3</div></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
-<script src="app.js?v=1.6.2"></script>
+<script src="app.js?v=1.6.3"></script>
 <script>
 const ids=['ais','tis','as26'],go=document.getElementById('go'),status=document.getElementById('status');
+const perfNow=()=>typeof performance!=='undefined'&&performance.now?performance.now():Date.now();
 const yieldUI=()=>new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
+function sec(ms){return (ms/1000).toFixed(2)+'s'}
 function setStage(n,text){for(let i=1;i<=5;i++){const e=document.getElementById('s'+i);e.classList.toggle('done',i<n);e.classList.toggle('active',i===n)}if(text){status.className='status';status.textContent=text}}
 function ready(){const ok=ids.every(id=>document.getElementById(id).files.length);go.disabled=!ok;ids.forEach(id=>document.getElementById('card-'+(id==='as26'?'26as':id)).classList.toggle('ready',document.getElementById(id).files.length>0));if(ok&&!status.textContent.startsWith('Done.')){status.className='status';status.textContent='Document set complete. Ready to validate and generate.'}}
 ids.forEach(id=>document.getElementById(id).addEventListener('change',e=>{const f=e.target.files[0],ok=document.getElementById(id+'Ok');ok.textContent=f?'✓ '+f.name:'No file selected';ok.className='file-name'+(f?'':' empty');ready()}));
 document.getElementById('reset').addEventListener('click',()=>location.reload());
-function workerCall(op,payload){return new Promise((resolve,reject)=>{const workerUrl=new URL('app.js?v=1.6.2',location.href).href;const src=`self.window=self;importScripts(${JSON.stringify(workerUrl)});self.onmessage=function(e){try{let out;if(e.data.op==='parseAIS')out=AISReco.parseAIS(e.data.pages);else if(e.data.op==='parseTIS')out=AISReco.parseTIS(e.data.pages);else if(e.data.op==='parse26AS')out=AISReco.parse26AS(e.data.pages);else if(e.data.op==='reconcile')out=AISReco.reconcile(e.data.ais,e.data.tis,e.data.as26,e.data.exceptions||[]);else throw new Error('Unknown worker operation');self.postMessage({ok:true,out:out});}catch(err){self.postMessage({ok:false,error:err&&err.message?err.message:String(err)});}};`;const url=URL.createObjectURL(new Blob([src],{type:'application/javascript'}));const w=new Worker(url);const timer=setTimeout(()=>{w.terminate();URL.revokeObjectURL(url);reject(new Error('Background parser timed out during '+op+'.'))},120000);w.onmessage=e=>{clearTimeout(timer);w.terminate();URL.revokeObjectURL(url);e.data.ok?resolve(e.data.out):reject(new Error(e.data.error||'Background parser failed.'))};w.onerror=e=>{clearTimeout(timer);w.terminate();URL.revokeObjectURL(url);reject(new Error('Background parser failed: '+(e.message||'unknown error')))}})}
-async function main(){go.disabled=true;try{const files={ais:ais.files[0],tis:tis.files[0],as26:as26.files[0]};setStage(1,'Reading the three statutory PDFs…');const [ap,tp,cp]=await Promise.all([AISReco.extractPdfLines(files.ais),AISReco.extractPdfLines(files.tis),AISReco.extractPdfLines(files.as26)]);setStage(2,'PDF extraction complete. Parsing AIS…');await yieldUI();const [a,e1]=await workerCall('parseAIS',{pages:ap});setStage(2,'AIS parsed. Parsing TIS…');await yieldUI();const [t,e2]=await workerCall('parseTIS',{pages:tp});setStage(2,'TIS parsed. Parsing Form 26AS…');await yieldUI();const [c,e3]=await workerCall('parse26AS',{pages:cp});if(!a.rows.length)throw new Error('AIS could not be recognised or no reporting rows were found.');if(!Object.keys(t.categories).length)throw new Error('TIS could not be recognised.');if(!Object.keys(c.map).length)throw new Error('Form 26AS could not be recognised.');const metas=[a.meta,t.meta,c.meta];if(metas.some(x=>!x.pan||!x.name||!x.fy||!x.ay))throw new Error('Client identity / year metadata is incomplete in one or more PDFs (PAN, Name, FY or AY missing).');const pans=[...new Set(metas.map(x=>x.pan).filter(Boolean))],fys=[...new Set(metas.map(x=>x.fy).filter(Boolean))],ays=[...new Set(metas.map(x=>x.ay).filter(Boolean))];if(pans.length>1)throw new Error('PAN mismatch across the three PDFs: '+pans.join(', '));if(fys.length>1)throw new Error('Financial Year mismatch across the three PDFs: '+fys.join(', '));if(ays.length>1)throw new Error('Assessment Year mismatch across the three PDFs: '+ays.join(', '));const clientName=metas[0].name;if(metas.some(x=>!AISReco.namesCompatible(clientName,x.name)))throw new Error('Client name mismatch across the three PDFs.');for(const m of metas)if(AISReco.deriveAY(m.fy)!==m.ay)throw new Error(`Invalid FY / AY combination detected: FY ${m.fy} should correspond to AY ${AISReco.deriveAY(m.fy)}, not AY ${m.ay}.`);setStage(3,'Reconciling AIS / TIS / 26AS parties and sections…');await yieldUI();const result=await workerCall('reconcile',{ais:a,tis:t,as26:c,exceptions:[...e1,...e2,...e3]});if(result.rows.length>54)throw new Error(`The supplied Excel template supports 54 Reco rows; ${result.rows.length} AIS rows were detected. No data was truncated.`);setStage(4,'Building the supplied Excel template…');await yieldUI();const blob=await AISReco.generateWorkbook(result,document.getElementById('preparedBy').value.trim());setStage(5,'Workbook ready. Preparing download…');await yieldUI();const url=URL.createObjectURL(blob),aEl=document.createElement('a');aEl.href=url;aEl.download=`${(result.meta.name||'Client').replace(/[^A-Za-z0-9 _.-]/g,'_')} - AIS-TIS-26AS Reconciliation - AY ${result.meta.ay||''}.xlsx`;document.body.appendChild(aEl);aEl.click();aEl.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);status.className='status ok';status.textContent=`Done. ${result.rows.length} Reco rows generated. ${result.exceptions.length} review exception(s) identified.`}catch(err){status.className='status err';status.textContent=err&&err.message?err.message:String(err)}finally{ready()}}
+
+async function extractPdfLinesFast(file,label,onProgress){
+  const t0=perfNow();
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  const pages=new Array(pdf.numPages);
+  let next=0,done=0;
+  const concurrency=Math.min(4,pdf.numPages);
+  async function worker(){
+    while(true){
+      const pno=++next;if(pno>pdf.numPages)return;
+      const page=await pdf.getPage(pno),tc=await page.getTextContent();
+      const bins=new Map();
+      for(const it of tc.items){
+        const str=(it.str||'').replace(/\u00a0/g,' ').trim();if(!str)continue;
+        const x=it.transform[4],y=it.transform[5],w=it.width||0;
+        const base=Math.round(y/2.5);let key=null;
+        for(const k of [base-1,base,base+1]){const r=bins.get(k);if(r&&Math.abs(r.y-y)<=2.5){key=k;break}}
+        if(key===null){key=base;bins.set(key,{y,items:[]})}
+        bins.get(key).items.push({x,w,str});
+      }
+      const rows=Array.from(bins.values()).sort((a,b)=>b.y-a.y);
+      pages[pno-1]=rows.map(r=>{
+        r.items.sort((a,b)=>a.x-b.x);let out='',lastEnd=null;
+        for(const it of r.items){const gap=lastEnd==null?0:it.x-lastEnd;if(out&&(gap>25||(it.x>=460&&lastEnd<460)||(it.x>=790&&lastEnd<790)||(it.x>=885&&lastEnd<885))){if(!out.endsWith(' '))out+=' || '}else if(out&&gap>2.5&&!out.endsWith(' '))out+=' ';out+=it.str;lastEnd=it.x+it.w}
+        return out.trim();
+      }).filter(Boolean);
+      done++;onProgress&&onProgress(done,pdf.numPages,label);
+    }
+  }
+  await Promise.all(Array.from({length:concurrency},()=>worker()));
+  return {pages,ms:perfNow()-t0};
+}
+
+function withTimeout(promise,ms,label){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error(label+' timed out after '+Math.round(ms/1000)+' seconds.')),ms);promise.then(v=>{clearTimeout(timer);resolve(v)},e=>{clearTimeout(timer);reject(e)})})}
+
+function workerCall(op,payload){return new Promise((resolve,reject)=>{const workerUrl=new URL('app.js?v=1.6.3',location.href).href;const src=`self.window=self;importScripts(${JSON.stringify(workerUrl)});self.onmessage=function(e){try{let out;if(e.data.op==='parseAIS')out=AISReco.parseAIS(e.data.pages);else if(e.data.op==='parseTIS')out=AISReco.parseTIS(e.data.pages);else if(e.data.op==='parse26AS')out=AISReco.parse26AS(e.data.pages);else if(e.data.op==='reconcile')out=AISReco.reconcile(e.data.ais,e.data.tis,e.data.as26,e.data.exceptions||[]);else throw new Error('Unknown worker operation');self.postMessage({ok:true,out:out});}catch(err){self.postMessage({ok:false,error:err&&err.message?err.message:String(err)});}};`;const url=URL.createObjectURL(new Blob([src],{type:'application/javascript'}));const w=new Worker(url);const timer=setTimeout(()=>{w.terminate();URL.revokeObjectURL(url);reject(new Error('Background parser timed out during '+op+'.'))},120000);w.onmessage=e=>{clearTimeout(timer);w.terminate();URL.revokeObjectURL(url);e.data.ok?resolve(e.data.out):reject(new Error(e.data.error||'Background parser failed.'))};w.onerror=e=>{clearTimeout(timer);w.terminate();URL.revokeObjectURL(url);reject(new Error('Background parser failed: '+(e.message||'unknown error')))}})}
+
+async function main(){
+  go.disabled=true;const run0=perfNow();let stage='Reading';
+  try{
+    const files={ais:ais.files[0],tis:tis.files[0],as26:as26.files[0]};
+    setStage(1,'Reading three statutory PDFs…');await yieldUI();
+    stage='Extracting';let pagesDone=0,totalPages=0;
+    const progress=(d,t,l)=>{pagesDone+=1;totalPages=Math.max(totalPages,t);status.textContent=`Extracting ${l}: page ${d}/${t} • ${pagesDone} completed`;};
+    const extraction=await withTimeout(Promise.all([
+      extractPdfLinesFast(files.ais,'AIS',progress),
+      extractPdfLinesFast(files.tis,'TIS',progress),
+      extractPdfLinesFast(files.as26,'26AS',progress)
+    ]),90000,'PDF extraction');
+    const [apx,tpx,cpx]=extraction;
+    setStage(2,`Extraction complete in ${sec(Math.max(apx.ms,tpx.ms,cpx.ms))}. Parsing AIS…`);await yieldUI();
+
+    stage='Parsing AIS';const ta=perfNow();const [a,e1]=await workerCall('parseAIS',{pages:apx.pages});const aisMs=perfNow()-ta;
+    setStage(2,`AIS parsed in ${sec(aisMs)}. Parsing TIS…`);await yieldUI();
+    stage='Parsing TIS';const tt=perfNow();const [t,e2]=await workerCall('parseTIS',{pages:tpx.pages});const tisMs=perfNow()-tt;
+    setStage(2,`TIS parsed in ${sec(tisMs)}. Parsing Form 26AS…`);await yieldUI();
+    stage='Parsing Form 26AS';const tc=perfNow();const [c,e3]=await workerCall('parse26AS',{pages:cpx.pages});const asMs=perfNow()-tc;
+
+    if(!a.rows.length)throw new Error('AIS could not be recognised or no reporting rows were found.');
+    if(!Object.keys(t.categories).length)throw new Error('TIS could not be recognised.');
+    if(!Object.keys(c.map).length)throw new Error('Form 26AS could not be recognised.');
+    const metas=[a.meta,t.meta,c.meta];if(metas.some(x=>!x.pan||!x.name||!x.fy||!x.ay))throw new Error('Client identity / year metadata is incomplete in one or more PDFs (PAN, Name, FY or AY missing).');
+    const pans=[...new Set(metas.map(x=>x.pan).filter(Boolean))],fys=[...new Set(metas.map(x=>x.fy).filter(Boolean))],ays=[...new Set(metas.map(x=>x.ay).filter(Boolean))];
+    if(pans.length>1)throw new Error('PAN mismatch across the three PDFs: '+pans.join(', '));
+    if(fys.length>1)throw new Error('Financial Year mismatch across the three PDFs: '+fys.join(', '));
+    if(ays.length>1)throw new Error('Assessment Year mismatch across the three PDFs: '+ays.join(', '));
+    const clientName=metas[0].name;if(metas.some(x=>!AISReco.namesCompatible(clientName,x.name)))throw new Error('Client name mismatch across the three PDFs.');
+    for(const m of metas)if(AISReco.deriveAY(m.fy)!==m.ay)throw new Error(`Invalid FY / AY combination detected: FY ${m.fy} should correspond to AY ${AISReco.deriveAY(m.fy)}, not AY ${m.ay}.`);
+
+    stage='Reconciling';setStage(3,`Reconciling AIS / TIS / 26AS…`);await yieldUI();const tr=perfNow();const result=await workerCall('reconcile',{ais:a,tis:t,as26:c,exceptions:[...e1,...e2,...e3]});const recoMs=perfNow()-tr;
+    if(result.rows.length>54)throw new Error(`The supplied Excel template supports 54 Reco rows; ${result.rows.length} AIS rows were detected. No data was truncated.`);
+
+    stage='Building';setStage(4,`Reconciliation complete in ${sec(recoMs)}. Building Excel…`);await yieldUI();const tb=perfNow();const blob=await AISReco.generateWorkbook(result,document.getElementById('preparedBy').value.trim());const buildMs=perfNow()-tb;
+    stage='Download';setStage(5,`Workbook built in ${sec(buildMs)}. Preparing download…`);await yieldUI();const url=URL.createObjectURL(blob),aEl=document.createElement('a');aEl.href=url;aEl.download=`${(result.meta.name||'Client').replace(/[^A-Za-z0-9 _.-]/g,'_')} - AIS-TIS-26AS Reconciliation - AY ${result.meta.ay||''}.xlsx`;document.body.appendChild(aEl);aEl.click();aEl.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    const total=perfNow()-run0;status.className='status ok';status.textContent=`Done in ${sec(total)} • ${result.rows.length} Reco rows • ${result.exceptions.length} exception(s).`;
+    console.info('[RECON TIMING]',{totalMs:total,aisExtractMs:apx.ms,tisExtractMs:tpx.ms,as26ExtractMs:cpx.ms,aisParseMs:aisMs,tisParseMs:tisMs,as26ParseMs:asMs,reconcileMs:recoMs,buildMs});
+  }catch(err){status.className='status err';status.textContent=`${stage}: ${err&&err.message?err.message:String(err)}`;console.error('[RECON ERROR]',{stage,error:err,elapsedMs:perfNow()-run0})}
+  finally{ready()}
+}
 go.addEventListener('click',main);
 </script>
 </body></html>
