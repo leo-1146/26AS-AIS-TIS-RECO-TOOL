@@ -1,1 +1,1 @@
-Version 1.8.4 - parser metadata hotfix for separated 26AS assessee-name layout; portable browser/server release
+Version 1.8.5 - deterministic statutory-header validation; explicit parser readiness gate; portable browser/server release
