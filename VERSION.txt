@@ -1,1 +1,1 @@
-Version 1.6.1 - hardened AIS wrapped-summary parsing, party matching, and partial GST category handling
+Version 1.6.2 - non-blocking parser/reconciliation workers, live stage progress, timeout/error reporting, and 54-row template guard
