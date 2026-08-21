@@ -1,1 +1,1 @@
-Version 1.8.2 - portable parser loader; browser/server compatible; hardened reconciliation flow
+Version 1.8.3 - hardened metadata validation using parser metadata engine; portable browser/server release
